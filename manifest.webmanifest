@@ -1,0 +1,16 @@
+{
+  "name": "蔵書カード",
+  "short_name": "蔵書カード",
+  "description": "本のバーコードをスキャンして日本十進分類法(NDC)を表示し、持っている本を管理します",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f1e7",
+  "theme_color": "#b4412f",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
