@@ -22,10 +22,10 @@
   html,body{ margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); }
   body{ min-height:100vh; padding-bottom:calc(92px + env(safe-area-inset-bottom)); }
 
+  .stickyWrap{ position:sticky; top:0; z-index:5; background:var(--paper); }
   .top{
-    position:sticky; top:0; z-index:5; background:var(--paper);
-    padding:calc(14px + env(safe-area-inset-top)) 16px 10px;
-    border-bottom:1px solid var(--line);
+    background:var(--paper);
+    padding:calc(14px + env(safe-area-inset-top)) 16px 6px;
     display:flex; align-items:flex-end; justify-content:space-between; gap:12px;
   }
   h1{ font-family:var(--serif); font-size:1.5rem; margin:0; letter-spacing:.08em; }
@@ -114,6 +114,27 @@
   .menu-list{ display:grid; gap:8px; }
   .menu-list button{ text-align:left; }
 
+
+  .tabs{ display:flex; gap:6px; padding:8px 14px 0; background:var(--paper); }
+  .tabs button{
+    flex:1; font:inherit; font-weight:600; padding:9px 10px; border-radius:10px 10px 0 0; cursor:pointer;
+    background:transparent; color:var(--muted); border:1px solid var(--line); border-bottom:none;
+  }
+  .tabs button[aria-selected="true"]{ background:var(--card); color:var(--accent); border-color:var(--accent); }
+  .searchrow{ padding:8px 14px 10px; background:var(--paper); border-bottom:1px solid var(--line); }
+  .searchrow input{ font-size:.95rem; }
+  .segctl{ display:flex; gap:6px; }
+  .segctl button{
+    flex:1; font:inherit; font-weight:600; padding:10px 8px; border-radius:10px; cursor:pointer;
+    background:var(--card); color:var(--muted); border:1px solid var(--line);
+  }
+  .segctl button[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+  .readFields{ display:grid; gap:12px; }
+  .readFields[hidden]{ display:none; }
+  textarea{ resize:vertical; min-height:72px; }
+  .field select, .field textarea, .field input[type=date]{ font-size:1rem; }
+  .tag.read{ border-color:var(--ok); color:var(--ok); }
+
   #toast{
     position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); transform:translateX(-50%);
     background:var(--ink); color:var(--paper); padding:10px 16px; border-radius:99px; font-size:.85rem;
@@ -125,12 +146,13 @@
 </head>
 <body>
 
+<div class="stickyWrap">
 <header class="top">
   <div>
     <h1>蔵書カード</h1>
     <p id="count">0冊</p>
   </div>
-  <label class="sort"><span>並び順</span>
+  <label class="sort" id="sortWrap"><span>並び順</span>
     <select id="sort">
       <option value="title">書名順</option>
       <option value="ndc">分類番号順</option>
@@ -140,10 +162,16 @@
     </select>
   </label>
 </header>
+<div class="tabs" role="tablist">
+  <button id="tabBooks" role="tab" aria-selected="true">蔵書</button>
+  <button id="tabReads" role="tab" aria-selected="false">読書記録</button>
+</div>
+<div class="searchrow"><input id="q" type="search" placeholder="書名・著者・ISBN・分類で検索" aria-label="検索"></div>
+</div>
 
 <main>
   <ul id="list"></ul>
-  <div id="empty" hidden><b>まだ本が登録されていません</b>下の「バーコードをスキャン」で、<br>最初の1冊を登録しましょう。</div>
+  <div id="empty" hidden></div>
 </main>
 
 <nav class="bar">
@@ -170,6 +198,10 @@
   <div class="dlg">
     <h3 id="formTitle">本を登録</h3>
     <p id="notice" hidden></p>
+    <div class="segctl" id="kindCtl" role="group" aria-label="登録の種類">
+      <button type="button" id="kBook" aria-pressed="true">蔵書に追加</button>
+      <button type="button" id="kRead" aria-pressed="false">読んだだけ</button>
+    </div>
     <label class="field">ISBN
       <input id="fIsbn" inputmode="numeric" placeholder="なければ空欄でOK">
     </label>
@@ -186,6 +218,21 @@
       <input id="fNdc" inputmode="decimal" placeholder="例：913.6">
     </label>
     <div id="ndcPreview"></div>
+    <div class="readFields" id="readFields" hidden>
+      <label class="field">読了日
+        <input id="fDate" type="date">
+      </label>
+      <label class="field">入手元
+        <select id="fSource">
+          <option value="own">自分の本</option>
+          <option value="library">図書館</option>
+          <option value="other">その他</option>
+        </select>
+      </label>
+      <label class="field">感想・メモ
+        <textarea id="fNote" placeholder="感想やメモ"></textarea>
+      </label>
+    </div>
     <div class="row">
       <button class="sub" id="btnRefetch" type="button">NDLで再取得</button>
     </div>
@@ -193,7 +240,7 @@
       <button class="primary" id="btnSave" type="button">保存</button>
       <button class="sub" id="btnFormClose" type="button">閉じる</button>
     </div>
-    <button class="danger" id="btnDelete" type="button" hidden>この本を削除</button>
+    <button class="danger" id="btnDelete" type="button" hidden>削除</button>
   </div>
 </dialog>
 
@@ -286,15 +333,18 @@
   }
 
   // ========== 保存 ==========
-  var KEY = "zoshoCard.books.v1", SORT_KEY = "zoshoCard.sort.v1";
-  var books = loadBooks();
-  function loadBooks(){
-    try{ var a = JSON.parse(localStorage.getItem(KEY)); return Array.isArray(a) ? a : []; }
+  var KEY = "zoshoCard.books.v1", RKEY = "zoshoCard.reads.v1", SORT_KEY = "zoshoCard.sort.v1";
+  var books = loadArr(KEY), reads = loadArr(RKEY);
+  function loadArr(k){
+    try{ var a = JSON.parse(localStorage.getItem(k)); return Array.isArray(a) ? a : []; }
     catch(e){ return []; }
   }
-  function saveBooks(){
-    try{ localStorage.setItem(KEY, JSON.stringify(books)); return true; }
-    catch(e){ toast("保存に失敗しました（容量不足の可能性）"); return false; }
+  function saveAll(){
+    try{
+      localStorage.setItem(KEY, JSON.stringify(books));
+      localStorage.setItem(RKEY, JSON.stringify(reads));
+      return true;
+    }catch(e){ toast("保存に失敗しました（容量不足の可能性）"); return false; }
   }
   if(navigator.storage && navigator.storage.persist){ navigator.storage.persist().catch(function(){}); }
 
@@ -302,10 +352,17 @@
   var toastTimer;
   function toast(msg){
     var t = $("toast"); t.textContent = msg; t.classList.add("show");
-    clearTimeout(toastTimer); toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 2600);
+    clearTimeout(toastTimer); toastTimer = setTimeout(function(){ t.classList.remove("show"); }, 2800);
+  }
+  function newId(p){ return p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  var SRC = { own:"自分の本", library:"図書館", other:"その他" };
+  function todayStr(){
+    var d = new Date(), p = function(n){ return ("0" + n).slice(-2); };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
   }
 
-  // ========== 一覧 ==========
+  // ========== 一覧・検索 ==========
+  var tab = "books"; // "books" | "reads"
   var cmpJa = new Intl.Collator("ja", { numeric:true });
   function ndcKey(b){
     var n = parseNdc(b.ndc);
@@ -313,8 +370,17 @@
     var p = n.split(".");
     return ("000" + p[0]).slice(-3) + "." + (p[1] || "");
   }
-  function sortedBooks(mode){
-    var a = books.slice();
+  function norm(s){
+    return String(s || "").normalize("NFKC").toLowerCase()
+      .replace(/[ァ-ヶ]/g, function(c){ return String.fromCharCode(c.charCodeAt(0) - 0x60); });
+  }
+  function matches(b, terms){
+    if(!terms.length) return true;
+    var hay = norm([b.title, b.kana, b.author, b.isbn, b.ndc, ndcText(b.ndc), b.note || ""].join(" "));
+    return terms.every(function(t){ return hay.indexOf(t) >= 0; });
+  }
+  function sortedBooks(mode, arr){
+    var a = (arr || books).slice();
     var byTitle = function(x, y){ return cmpJa.compare(x.kana || x.title || "", y.kana || y.title || ""); };
     if(mode === "ndc"){
       a.sort(function(x, y){
@@ -339,6 +405,13 @@
     }
     return a;
   }
+  function sortedReads(arr){
+    return arr.slice().sort(function(x, y){
+      var dx = x.readDate || "", dy = y.readDate || "";
+      if(dx !== dy) return dx < dy ? 1 : -1;
+      return (y.addedAt || 0) - (x.addedAt || 0);
+    });
+  }
 
   function el(tag, cls, text){
     var e = document.createElement(tag);
@@ -348,12 +421,35 @@
   }
 
   function render(){
-    var mode = $("sort").value;
+    var isBooks = tab === "books";
+    $("tabBooks").setAttribute("aria-selected", isBooks);
+    $("tabReads").setAttribute("aria-selected", !isBooks);
+    $("sortWrap").hidden = !isBooks;
+    var terms = norm($("q").value).split(/\s+/).filter(Boolean);
+    var src = isBooks ? books : reads;
+    var filtered = src.filter(function(b){ return matches(b, terms); });
+    var arr = isBooks ? sortedBooks($("sort").value, filtered) : sortedReads(filtered);
+
     var list = $("list");
     list.textContent = "";
-    var arr = sortedBooks(mode);
-    $("count").textContent = books.length + "冊";
-    $("empty").hidden = books.length > 0;
+    $("count").textContent = isBooks
+      ? (terms.length ? filtered.length + " / " + books.length + "冊" : books.length + "冊")
+      : (terms.length ? filtered.length + " / " + reads.length + "件の記録" : reads.length + "件の記録");
+
+    var empty = $("empty");
+    if(!arr.length){
+      empty.hidden = false;
+      empty.textContent = "";
+      var b = el("b", "", terms.length ? "見つかりませんでした" :
+                  (isBooks ? "まだ本が登録されていません" : "まだ読書記録がありません"));
+      empty.appendChild(b);
+      if(!terms.length){
+        empty.appendChild(document.createTextNode(isBooks
+          ? "下の「バーコードをスキャン」で、最初の1冊を登録しましょう。"
+          : "スキャンして「読んだだけ」を選ぶと、ここに記録されます。"));
+      }
+    } else { empty.hidden = true; }
+
     arr.forEach(function(b){
       var li = el("li", "book");
       var btn = el("button");
@@ -363,14 +459,18 @@
       label.appendChild(el("b", "", info ? info.int : "—"));
       label.appendChild(el("small", "", info ? info.dec : ""));
       var meta = el("div", "meta");
-      var h = el("h2", "", b.title || "(無題)");
-      meta.appendChild(h);
+      meta.appendChild(el("h2", "", b.title || "(無題)"));
       var au = el("p", "", b.author || "著者不明");
       if(!b.kana){ au.appendChild(el("span", "tag", "読み未設定")); }
       meta.appendChild(au);
       meta.appendChild(el("p", "cls", info ? ndcText(b.ndc) : "分類なし"));
+      if(!isBooks){
+        var line = (b.readDate ? "読了 " + b.readDate : "読了日なし") + "　" + (SRC[b.source] || "その他");
+        meta.appendChild(el("p", "", line));
+        if(b.note){ meta.appendChild(el("p", "", b.note.replace(/\s+/g, " ").slice(0, 40) + (b.note.length > 40 ? "…" : ""))); }
+      }
       btn.appendChild(label); btn.appendChild(meta);
-      btn.addEventListener("click", function(){ openForm(b, { edit:true }); });
+      btn.addEventListener("click", function(){ openForm(b, { kind: isBooks ? "book" : "read", edit:true }); });
       li.appendChild(btn);
       list.appendChild(li);
     });
@@ -383,6 +483,9 @@
     try{ localStorage.setItem(SORT_KEY, $("sort").value); }catch(e){}
     render();
   });
+  $("q").addEventListener("input", render);
+  $("tabBooks").addEventListener("click", function(){ tab = "books"; render(); });
+  $("tabReads").addEventListener("click", function(){ tab = "reads"; render(); });
 
   // ========== NDL / openBD 検索 ==========
   function fetchT(url, ms){
@@ -420,12 +523,7 @@
       var cs = it.getElementsByTagNameNS("*", "creator");
       for(var i = 0; i < cs.length; i++){ var s = (cs[i].textContent || "").trim(); if(s) authors.push(s); }
       if(!authors.length){ var a = txt(it, "author"); if(a) authors.push(a); }
-      return {
-        title: txt(it, "title"),
-        kana: txt(it, "titleTranscription"),
-        author: authors.join(" / "),
-        ndc: pickNdc(it)
-      };
+      return { title: txt(it, "title"), kana: txt(it, "titleTranscription"), author: authors.join(" / "), ndc: pickNdc(it) };
     });
   }
   function lookupOpenBd(isbn){
@@ -438,7 +536,6 @@
       return { title: s.title || "", kana: kana, author: s.author || "", ndc: "" };
     });
   }
-  // 結果: { data, msg }
   function lookup(isbn){
     var ndlErr = false;
     return lookupNdl(isbn).catch(function(){ ndlErr = true; return null; }).then(function(nd){
@@ -456,7 +553,7 @@
 
   // ========== フォーム ==========
   var formDlg = $("formDlg");
-  var cur = null; // { id, isbn, edit }
+  var cur = null; // { kind, id, isbn, edit, dup }
   function setNotice(msg, dup){
     var n = $("notice");
     n.hidden = !msg; n.textContent = msg || "";
@@ -468,17 +565,40 @@
   }
   $("fNdc").addEventListener("input", updatePreview);
 
+  var DUP_MSG = "この本はすでに登録されています。保存すると、同じ本をもう1冊登録します。";
+  function setKind(kind){
+    cur.kind = kind;
+    $("kBook").setAttribute("aria-pressed", kind === "book");
+    $("kRead").setAttribute("aria-pressed", kind === "read");
+    $("readFields").hidden = kind !== "read";
+    $("formTitle").textContent = cur.edit ? (kind === "book" ? "本の情報" : "読書記録") : (kind === "book" ? "本を登録" : "読書記録を追加");
+    var n = $("notice");
+    if(cur.dup){
+      if(kind === "book"){ setNotice(DUP_MSG, true); }
+      else if(n.className === "dup"){ setNotice(""); }
+    }
+  }
+  $("kBook").addEventListener("click", function(){ setKind("book"); });
+  $("kRead").addEventListener("click", function(){
+    setKind("read");
+    if(!$("fDate").value) $("fDate").value = todayStr();
+  });
+
   function openForm(b, opt){
     opt = opt || {};
-    cur = { id: b.id || null, isbn: b.isbn || "", edit: !!opt.edit };
-    $("formTitle").textContent = opt.edit ? "本の情報" : "本を登録";
+    cur = { kind: opt.kind || "book", id: b.id || null, isbn: b.isbn || "", edit: !!opt.edit, dup: !!opt.dup };
     $("fIsbn").value = b.isbn || "";
     $("fTitle").value = b.title || "";
     $("fKana").value = b.kana || "";
     $("fAuthor").value = b.author || "";
     $("fNdc").value = b.ndc || "";
-    $("btnDelete").hidden = !opt.edit;
-    setNotice(opt.dup ? "この本はすでに登録されています。内容を直して保存すると上書きされます。" : (opt.msg || ""), !!opt.dup);
+    $("fDate").value = b.readDate || "";
+    $("fSource").value = b.source || "own";
+    $("fNote").value = b.note || "";
+    $("kindCtl").hidden = cur.edit;
+    $("btnDelete").hidden = !cur.edit;
+    setNotice(opt.msg || "");
+    setKind(cur.kind);
     updatePreview();
     if(!formDlg.open) formDlg.showModal();
   }
@@ -504,7 +624,6 @@
     var isbn = normalizeIsbn($("fIsbn").value);
     if(!isbn){ toast("正しいISBNを入力してください"); return; }
     cur.isbn = isbn; $("fIsbn").value = isbn;
-    // 再取得は空欄のみ補完
     runLookup(isbn);
   });
 
@@ -521,31 +640,41 @@
     var ndc = ndcRaw ? parseNdc(ndcRaw) : "";
     if(ndcRaw && !ndc){ toast("分類番号は数字で入力してください（例：913.6）"); return; }
 
-    var idx = -1;
-    if(cur.id) idx = books.findIndex(function(x){ return x.id === cur.id; });
-    if(idx < 0 && isbn) idx = books.findIndex(function(x){ return x.isbn === isbn; });
+    var arr = cur.kind === "book" ? books : reads;
+    var idx = cur.id ? arr.findIndex(function(x){ return x.id === cur.id; }) : -1;
+    if(cur.kind === "book" && idx < 0 && isbn && books.some(function(x){ return x.isbn === isbn; })){
+      if(!confirm("この本はすでに登録されています。登録しますか？")) return;
+    }
     var now = Date.now();
     var entry = {
-      id: idx >= 0 ? books[idx].id : (isbn || "m" + now.toString(36)),
+      id: idx >= 0 ? arr[idx].id : newId(cur.kind === "book" ? "b" : "r"),
       isbn: isbn,
       title: title,
       kana: $("fKana").value.trim(),
       author: $("fAuthor").value.trim(),
       ndc: ndc,
-      addedAt: idx >= 0 ? (books[idx].addedAt || now) : now
+      addedAt: idx >= 0 ? (arr[idx].addedAt || now) : now
     };
-    if(idx >= 0) books[idx] = entry; else books.push(entry);
-    if(saveBooks()){
-      formDlg.close(); render();
-      toast(idx >= 0 ? "更新しました" : "登録しました");
+    if(cur.kind === "read"){
+      entry.readDate = $("fDate").value || "";
+      entry.source = $("fSource").value || "own";
+      entry.note = $("fNote").value.trim();
+    }
+    if(idx >= 0) arr[idx] = entry; else arr.push(entry);
+    if(saveAll()){
+      formDlg.close();
+      tab = cur.kind === "book" ? "books" : "reads";
+      render();
+      toast(idx >= 0 ? "更新しました" : (cur.kind === "book" ? "蔵書に登録しました" : "読書記録に追加しました"));
     }
   });
 
   $("btnDelete").addEventListener("click", function(){
     if(!cur || !cur.id) return;
-    if(!confirm("この本を一覧から削除しますか？")) return;
-    books = books.filter(function(x){ return x.id !== cur.id; });
-    if(saveBooks()){ formDlg.close(); render(); toast("削除しました"); }
+    if(!confirm(cur.kind === "book" ? "この本を蔵書から削除しますか？" : "この読書記録を削除しますか？")) return;
+    if(cur.kind === "book") books = books.filter(function(x){ return x.id !== cur.id; });
+    else reads = reads.filter(function(x){ return x.id !== cur.id; });
+    if(saveAll()){ formDlg.close(); render(); toast("削除しました"); }
   });
   $("btnFormClose").addEventListener("click", function(){ formDlg.close(); });
 
@@ -610,8 +739,12 @@
     if(fromCamera && navigator.vibrate) navigator.vibrate(60);
     closeScanner();
     var ex = books.find(function(b){ return b.isbn === isbn; });
-    if(ex){ openForm(ex, { edit:true, dup:true }); return; }
-    openForm({ isbn:isbn }, { edit:false });
+    if(ex){
+      // 登録済み: 既存の情報を引き継いで、重複登録の警告を表示
+      openForm({ isbn:isbn, title:ex.title, kana:ex.kana, author:ex.author, ndc:ex.ndc }, { kind:"book", dup:true });
+      return;
+    }
+    openForm({ isbn:isbn }, { kind:"book" });
     runLookup(isbn);
   }
 
@@ -629,25 +762,68 @@
   var menuDlg = $("menuDlg");
   $("btnMenu").addEventListener("click", function(){ menuDlg.showModal(); });
   $("mClose").addEventListener("click", function(){ menuDlg.close(); });
-  $("mAdd").addEventListener("click", function(){ menuDlg.close(); openForm({}, { edit:false }); });
+  $("mAdd").addEventListener("click", function(){ menuDlg.close(); openForm({}, { kind: tab === "reads" ? "read" : "book" }); });
 
   $("mExport").addEventListener("click", function(){
     menuDlg.close();
-    if(!books.length){ toast("書き出す本がありません"); return; }
+    if(!books.length && !reads.length){ toast("書き出すデータがありません"); return; }
     var d = new Date();
     var pad = function(n){ return ("0" + n).slice(-2); };
     var name = "zosho-" + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + ".json";
-    var data = { app:"zosho-card", version:1, exportedAt:d.toISOString(), books:books };
+    var data = { app:"zosho-card", version:2, exportedAt:d.toISOString(), books:books, reads:reads };
     var blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
-    toast(books.length + "冊を書き出しました");
+    toast("蔵書" + books.length + "冊・読書記録" + reads.length + "件を書き出しました");
   });
 
   $("mImport").addEventListener("click", function(){ menuDlg.close(); $("fileInput").value = ""; $("fileInput").click(); });
+
+  function cleanEntry(x, isRead){
+    if(!x || typeof x !== "object" || !String(x.title || "").trim()) return null;
+    var isbn = x.isbn ? normalizeIsbn(x.isbn) : "";
+    var e = {
+      id: String(x.id || newId(isRead ? "r" : "b")),
+      isbn: isbn,
+      title: String(x.title).trim(),
+      kana: String(x.kana || "").trim(),
+      author: String(x.author || "").trim(),
+      ndc: parseNdc(x.ndc),
+      addedAt: Number(x.addedAt) || Date.now()
+    };
+    if(isRead){
+      e.readDate = /^\d{4}-\d{2}-\d{2}$/.test(String(x.readDate || "")) ? x.readDate : "";
+      e.source = SRC[x.source] ? x.source : "other";
+      e.note = String(x.note || "").trim();
+    }
+    return e;
+  }
+  // 蔵書: 同じidはその本を上書き。idが違っても同じISBNは、未対応の既存1冊とペアにして上書き。余りは追加。
+  function mergeBooks(list, stat){
+    var used = {};
+    list.forEach(function(x){
+      var e = cleanEntry(x, false);
+      if(!e){ stat.skipped++; return; }
+      var i = books.findIndex(function(b){ return b.id === e.id; });
+      if(i < 0 && e.isbn){
+        i = books.findIndex(function(b){ return b.isbn === e.isbn && !used[b.id]; });
+      }
+      if(i >= 0){ e.id = books[i].id; books[i] = e; used[e.id] = true; stat.over++; }
+      else { books.push(e); used[e.id] = true; stat.added++; }
+    });
+  }
+  function mergeReads(list, stat){
+    list.forEach(function(x){
+      var e = cleanEntry(x, true);
+      if(!e){ stat.skipped++; return; }
+      var i = reads.findIndex(function(b){ return b.id === e.id; });
+      if(i >= 0){ reads[i] = e; stat.over++; } else { reads.push(e); stat.added++; }
+    });
+  }
+
   $("fileInput").addEventListener("change", function(){
     var f = $("fileInput").files[0];
     if(!f) return;
@@ -655,34 +831,21 @@
     r.onload = function(){
       var j;
       try{ j = JSON.parse(r.result); }catch(e){ toast("ファイルを読み込めませんでした（形式が違います）"); return; }
-      var arr = Array.isArray(j) ? j : (j && Array.isArray(j.books) ? j.books : null);
-      if(!arr){ toast("蔵書データが見つかりませんでした"); return; }
-      var added = 0, over = 0, skipped = 0;
-      arr.forEach(function(x){
-        if(!x || typeof x !== "object" || !String(x.title || "").trim()){ skipped++; return; }
-        var isbn = x.isbn ? normalizeIsbn(x.isbn) : "";
-        var e = {
-          id: String(x.id || isbn || "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
-          isbn: isbn,
-          title: String(x.title).trim(),
-          kana: String(x.kana || "").trim(),
-          author: String(x.author || "").trim(),
-          ndc: parseNdc(x.ndc),
-          addedAt: Number(x.addedAt) || Date.now()
-        };
-        var i = books.findIndex(function(b){ return b.id === e.id || (isbn && b.isbn === isbn); });
-        if(i >= 0){ e.id = books[i].id; books[i] = e; over++; } else { books.push(e); added++; }
-      });
-      if(saveBooks()){
+      var bl = Array.isArray(j) ? j : (j && Array.isArray(j.books) ? j.books : null);
+      var rl = j && !Array.isArray(j) && Array.isArray(j.reads) ? j.reads : [];
+      if(!bl && !rl.length){ toast("蔵書データが見つかりませんでした"); return; }
+      var stat = { added:0, over:0, skipped:0 };
+      mergeBooks(bl || [], stat);
+      mergeReads(rl, stat);
+      if(saveAll()){
         render();
-        toast("読み込み完了：追加" + added + "冊／上書き" + over + "冊" + (skipped ? "／除外" + skipped + "件" : ""));
+        toast("読み込み完了：追加" + stat.added + "件／上書き" + stat.over + "件" + (stat.skipped ? "／除外" + stat.skipped + "件" : ""));
       }
     };
     r.onerror = function(){ toast("ファイルを読み込めませんでした"); };
     r.readAsText(f);
   });
 
-  // ダイアログの背景タップで閉じる
   [formDlg, menuDlg].forEach(function(d){
     d.addEventListener("click", function(e){ if(e.target === d) d.close(); });
   });
@@ -693,8 +856,8 @@
     navigator.serviceWorker.register("sw.js").catch(function(){});
   }
 
-  // テスト用に公開(通常動作には影響なし)
-  window.__zosho = { normalizeIsbn:normalizeIsbn, isbn13Valid:isbn13Valid, parseNdc:parseNdc, ndcText:ndcText, sortedBooks:sortedBooks, getBooks:function(){ return books; } };
+  window.__zosho = { normalizeIsbn:normalizeIsbn, isbn13Valid:isbn13Valid, parseNdc:parseNdc, ndcText:ndcText,
+    getBooks:function(){ return books; }, getReads:function(){ return reads; } };
 })();
 </script>
 </body>
