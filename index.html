@@ -536,9 +536,22 @@
       return { title: s.title || "", kana: kana, author: s.author || "", ndc: "" };
     });
   }
-  function lookup(isbn){
+  // NDLは一時的に失敗しやすいので、接続エラー時は最大3回まで再試行する
+  function retry(fn, n, onRetry){
+    var attempt = 1;
+    function go(){
+      return fn().catch(function(e){
+        if(attempt >= n) throw e;
+        attempt++;
+        if(onRetry) onRetry(attempt);
+        return new Promise(function(r){ setTimeout(r, 700); }).then(go);
+      });
+    }
+    return go();
+  }
+  function lookup(isbn, onRetry){
     var ndlErr = false;
-    return lookupNdl(isbn).catch(function(){ ndlErr = true; return null; }).then(function(nd){
+    return retry(function(){ return lookupNdl(isbn); }, 3, onRetry).catch(function(){ ndlErr = true; return null; }).then(function(nd){
       if(nd && nd.title){
         return { data: nd, msg: nd.ndc ? "NDLサーチから取得しました。" : "NDLサーチに分類番号がありませんでした。分類番号は手入力してください。" };
       }
@@ -615,7 +628,9 @@
   }
   function runLookup(isbn){
     setNotice("検索中…");
-    return lookup(isbn).then(function(res){
+    return lookup(isbn, function(n){
+      if(formDlg.open && cur && cur.isbn === isbn) setNotice("NDLサーチに再接続しています…（" + n + "/3回目）");
+    }).then(function(res){
       if(formDlg.open && cur && cur.isbn === isbn) fillFromLookup(res);
     });
   }
