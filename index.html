@@ -379,9 +379,27 @@
     var hay = norm([b.title, b.kana, b.author, b.isbn, b.ndc, ndcText(b.ndc), b.note || ""].join(" "));
     return terms.every(function(t){ return hay.indexOf(t) >= 0; });
   }
+  // 書名の末尾の数字(巻数)を取り出す。「第3巻」「 11」などに対応
+  function volOf(str){
+    var m = String(str || "").normalize("NFKC").match(/(?:第\s*)?(\d+)\s*(?:巻|冊|集|話)?\s*$/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+  // 並び替え用キー: 読み(なければ書名)からスペースと末尾の巻数を除いたもの + 巻数
+  function titleKey(b){
+    var t = String(b.title || "").normalize("NFKC"), k = String(b.kana || "").normalize("NFKC");
+    var vol = volOf(t);
+    if(vol === null) vol = volOf(k);
+    var base = (k || t).replace(/[\s\u3000]+/g, "")
+      .replace(/[ぁ-ゖ]/g, function(c){ return String.fromCharCode(c.charCodeAt(0) + 0x60); })
+      .replace(/(?:第)?\d+(?:巻|冊|集|話)?$/, "");
+    return { base: base, vol: vol === null ? -1 : vol };
+  }
   function sortedBooks(mode, arr){
     var a = (arr || books).slice();
-    var byTitle = function(x, y){ return cmpJa.compare(x.kana || x.title || "", y.kana || y.title || ""); };
+    var byTitle = function(x, y){
+      var a = titleKey(x), b = titleKey(y);
+      return cmpJa.compare(a.base, b.base) || (a.vol - b.vol);
+    };
     if(mode === "ndc"){
       a.sort(function(x, y){
         var kx = ndcKey(x), ky = ndcKey(y);
@@ -523,7 +541,17 @@
       var cs = it.getElementsByTagNameNS("*", "creator");
       for(var i = 0; i < cs.length; i++){ var s = (cs[i].textContent || "").trim(); if(s) authors.push(s); }
       if(!authors.length){ var a = txt(it, "author"); if(a) authors.push(a); }
-      return { title: txt(it, "title"), kana: txt(it, "titleTranscription"), author: authors.join(" / "), ndc: pickNdc(it) };
+      // 書名候補のうち巻数つきを優先し、巻数がなければNDLの「巻次」を補う
+      var titles = [];
+      var tn = it.getElementsByTagNameNS("*", "title");
+      for(var j = 0; j < tn.length; j++){ var tt = (tn[j].textContent || "").trim(); if(tt) titles.push(tt); }
+      var title = titles.filter(function(x){ return volOf(x) !== null; })[0] || titles[0] || "";
+      var vol = txt(it, "volume");
+      if(title && vol && volOf(title) === null){
+        var dm = vol.normalize("NFKC").match(/\d+/);
+        title = title + " " + (dm ? dm[0] : vol);
+      }
+      return { title: title, kana: txt(it, "titleTranscription"), author: authors.join(" / "), ndc: pickNdc(it) };
     });
   }
   function lookupOpenBd(isbn){
