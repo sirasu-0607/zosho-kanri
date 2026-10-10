@@ -393,7 +393,8 @@
     var t = String(b.title || "").normalize("NFKC"), k = String(b.kana || "").normalize("NFKC");
     var vol = volOf(t);
     if(vol === null) vol = volOf(k);
-    var base = (k || t).replace(/[\s\u3000]+/g, "")
+    // スペース・記号(△など)を除く: 読みに記号があるものとないものを同じ並びにするため
+    var base = (k || t).replace(/[\p{Z}\p{P}\p{S}\s]+/gu, "")
       .replace(/[ぁ-ゖ]/g, function(c){ return String.fromCharCode(c.charCodeAt(0) + 0x60); })
       .replace(/(?:第)?\d+(?:巻|冊|集|話)?$/, "");
     return { base: base, vol: vol === null ? -1 : vol };
@@ -931,7 +932,7 @@
   });
 
   // ========== バージョン(更新するたびに上げる) ==========
-  var APP_VERSION = "2026.10.10-1";
+  var APP_VERSION = "2026.10.10-2";
   $("ver").textContent = "バージョン " + APP_VERSION;
 
   // ========== 起動 ==========
