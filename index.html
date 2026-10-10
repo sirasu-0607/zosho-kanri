@@ -135,6 +135,8 @@
   .field select, .field textarea, .field input[type=date]{ font-size:1rem; }
   .tag.read{ border-color:var(--ok); color:var(--ok); }
 
+  .ver{ margin:2px 0 0; text-align:center; font-size:.72rem; color:var(--muted); }
+
   #toast{
     position:fixed; left:50%; bottom:calc(96px + env(safe-area-inset-bottom)); transform:translateX(-50%);
     background:var(--ink); color:var(--paper); padding:10px 16px; border-radius:99px; font-size:.85rem;
@@ -255,6 +257,7 @@
       <button class="sub" id="mImport">ファイルから読み込む（同じ本は上書き）</button>
       <button class="sub" id="mClose">閉じる</button>
     </div>
+    <p class="ver" id="ver"></p>
   </div>
 </dialog>
 
@@ -926,6 +929,10 @@
   [formDlg, menuDlg].forEach(function(d){
     d.addEventListener("click", function(e){ if(e.target === d) d.close(); });
   });
+
+  // ========== バージョン(更新するたびに上げる) ==========
+  var APP_VERSION = "2026.10.10-1";
+  $("ver").textContent = "バージョン " + APP_VERSION;
 
   // ========== 起動 ==========
   render();
