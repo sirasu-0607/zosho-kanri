@@ -530,6 +530,18 @@
     }
     return found["10"] || found["9"] || found["8"] || "";
   }
+  // 「書名 = English」「書名 : English subtitle」の英語部分を除く(日本語が含まれる場合のみ)
+  function stripEnglish(str){
+    var parts = String(str || "").split(/\s*[=＝]\s*/)[0].trim().split(/\s+[:：]\s+/);
+    var jp = function(x){ return /[\u3040-\u30ff\u3400-\u9fff]/.test(x); };
+    var latin = function(x){ return /[A-Za-z]/.test(x) && !jp(x); };
+    if(!parts.some(jp)) return { text: parts.join(" : "), kept: parts.length, dropped: false, droppedVol: null };
+    var kept = [], droppedVol = null;
+    parts.forEach(function(p){
+      if(latin(p)){ var v = volOf(p); if(v !== null) droppedVol = v; } else kept.push(p);
+    });
+    return { text: kept.join(" : "), kept: kept.length, dropped: kept.length !== parts.length, droppedVol: droppedVol };
+  }
   function lookupNdl(isbn){
     return fetchT("https://ndlsearch.ndl.go.jp/api/opensearch?isbn=" + isbn + "&cnt=5").then(function(r){ return r.text(); })
     .then(function(xml){
@@ -542,22 +554,27 @@
       var cs = it.getElementsByTagNameNS("*", "creator");
       for(var i = 0; i < cs.length; i++){ var s = (cs[i].textContent || "").trim(); if(s) authors.push(s); }
       if(!authors.length){ var a = txt(it, "author"); if(a) authors.push(a); }
-      // 書名候補のうち巻数つきを優先し、巻数がなければNDLの「巻次」を補う
+      // 書名候補から英語の並列書名・副書名を除き、巻数つきを優先。巻数がなければNDLの「巻次」を補う
       var titles = [];
       var tn = it.getElementsByTagNameNS("*", "title");
       for(var j = 0; j < tn.length; j++){
-        // 並列書名(「書名 = 英語タイトル」)は捨てて、日本語の書名側だけ使う
-        var tt = (tn[j].textContent || "").split(/\s*[=＝]\s*/)[0].trim();
-        if(tt) titles.push(tt);
+        var cl = stripEnglish(tn[j].textContent || "");
+        if(cl.text) titles.push(cl);
       }
-      var title = titles.filter(function(x){ return volOf(x) !== null; })[0] || titles[0] || "";
+      var pick = titles.filter(function(x){ return volOf(x.text) !== null; })[0] || titles[0] || { text:"", kept:0, dropped:false, droppedVol:null };
+      var title = pick.text;
+      var kana = txt(it, "titleTranscription");
+      if(pick.dropped){
+        // 英語部分を落としたときは、読みも対応する先頭部分だけにする
+        kana = kana.split(/\s+[:：]\s+/).slice(0, Math.max(pick.kept, 1)).join(" : ");
+      }
       var vol = txt(it, "volume"), volAdded = false;
-      if(title && vol && volOf(title) === null){
-        var dm = vol.normalize("NFKC").match(/\d+/);
-        title = title + " " + (dm ? dm[0] : vol);
-        volAdded = true;
+      if(title && volOf(title) === null){
+        var dm = vol ? vol.normalize("NFKC").match(/\d+/) : null;
+        var add = vol ? (dm ? dm[0] : vol) : (pick.droppedVol !== null ? String(pick.droppedVol) : "");
+        if(add){ title = title + " " + add; volAdded = true; }
       }
-      return { title: title, kana: txt(it, "titleTranscription"), author: authors.join(" / "), ndc: pickNdc(it), volAdded: volAdded };
+      return { title: title, kana: kana, author: authors.join(" / "), ndc: pickNdc(it), volAdded: volAdded };
     });
   }
   function lookupOpenBd(isbn){
