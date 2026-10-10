@@ -545,7 +545,11 @@
       // 書名候補のうち巻数つきを優先し、巻数がなければNDLの「巻次」を補う
       var titles = [];
       var tn = it.getElementsByTagNameNS("*", "title");
-      for(var j = 0; j < tn.length; j++){ var tt = (tn[j].textContent || "").trim(); if(tt) titles.push(tt); }
+      for(var j = 0; j < tn.length; j++){
+        // 並列書名(「書名 = 英語タイトル」)は捨てて、日本語の書名側だけ使う
+        var tt = (tn[j].textContent || "").split(/\s*[=＝]\s*/)[0].trim();
+        if(tt) titles.push(tt);
+      }
       var title = titles.filter(function(x){ return volOf(x) !== null; })[0] || titles[0] || "";
       var vol = txt(it, "volume"), volAdded = false;
       if(title && vol && volOf(title) === null){
